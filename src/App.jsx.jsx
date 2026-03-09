@@ -270,14 +270,14 @@ const WHO_OPTIONS = [
 const CUISINE_OPTIONS = [
   "Sonoran","American","Mexican","Italian","Japanese","Chinese","Indian",
   "Thai","Vietnamese","Mediterranean","French","Korean","Seafood",
-  "BBQ","Pizza","Burgers","Vegan","Middle Eastern","Greek","Other",
+  "BBQ","Pizza","Burgers","Wings","Vegan","Middle Eastern","Greek","Other",
 ];
 
 const CUISINE_EMOJI = {
   American:"🍔", Italian:"🍝", Mexican:"🌮", Japanese:"🍣", Chinese:"🥡",
   Indian:"🍛", Thai:"🍜", Vietnamese:"🍜", Mediterranean:"🫒", French:"🥐",
-  Korean:"🍱", Seafood:"🦞", BBQ:"🍖", Pizza:"🍕", Burgers:"🍔", Vegan:"🥗",
-  "Middle Eastern":"🧆", Greek:"🫙", Sonoran:"🌵", Other:"🍽️",
+  Korean:"🍱", Seafood:"🦞", BBQ:"🍖", Pizza:"🍕", Burgers:"🍔", Wings:"🍗",
+  Vegan:"🥗", "Middle Eastern":"🧆", Greek:"🫙", Sonoran:"🌵", Other:"🍽️",
 };
 
 const validate = ({ firstName, email, phone, zip }) => {
@@ -1700,9 +1700,19 @@ function TucsonEatsAdmin() {
         votedAt: Date.now(),
         sessionStart: null,
       };
-      const updated = [...registry, newEntry];
-      await storage.set(REGISTRY_KEY, JSON.stringify(updated));
-      setRegistry(updated);
+      const updatedRegistry = [...registry, newEntry];
+      await storage.set(REGISTRY_KEY, JSON.stringify(updatedRegistry));
+      setRegistry(updatedRegistry);
+
+      // Increment vote count for selected restaurant
+      if (custEditForm.votedFor) {
+        const updatedRests = restaurants.map(r =>
+          r.id === custEditForm.votedFor ? { ...r, votes: r.votes + 1 } : r
+        );
+        await storage.set(STORAGE_KEY, JSON.stringify(updatedRests));
+        setRests(updatedRests);
+      }
+
       setCustEditModal(null);
       showToast("✅ Customer added");
     } else {
@@ -1711,6 +1721,21 @@ function TucsonEatsAdmin() {
         r.email === custEditModal.email && r.votedAt === custEditModal.votedAt
       );
       if (idx === -1) return;
+
+      const oldVote = custEditModal.votedFor;
+      const newVote = custEditForm.votedFor;
+
+      // If vote changed, adjust restaurant vote counts
+      if (oldVote !== newVote) {
+        const updatedRests = restaurants.map(r => {
+          if (r.id === oldVote) return { ...r, votes: Math.max(0, r.votes - 1) };
+          if (r.id === newVote) return { ...r, votes: r.votes + 1 };
+          return r;
+        });
+        await storage.set(STORAGE_KEY, JSON.stringify(updatedRests));
+        setRests(updatedRests);
+      }
+
       const updated = [...registry];
       updated[idx] = { ...updated[idx], ...custEditForm };
       await storage.set(REGISTRY_KEY, JSON.stringify(updated));
