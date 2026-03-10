@@ -212,7 +212,11 @@ const GLOBAL_CSS = `
   @keyframes te-pulse { 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:.5;transform:scale(1.3);} }
   .te-fade-up { animation: te-fadeUp .4s ease forwards; }
   .te-flash-glow { animation: te-flashGlow 1.2s ease; }
-  @media(max-width: 750px) { .te-hero-grid { grid-template-columns: 1fr !important; } .te-rankings-col { display: none !important; } }
+  @media(max-width: 750px) {
+    .te-hero-grid { grid-template-columns: 1fr !important; }
+    .te-rankings-col { display: block !important; width: 100% !important; height: auto !important; min-height: 300px !important; max-height: 420px !important; position: static !important; border-left: none !important; border-top: 1px solid rgba(184,134,11,.3) !important; }
+    .te-vote-right { display: none !important; }
+  }
 `;
 
 // ── Storage (Cloudflare KV via Worker) ───────────────────
@@ -752,7 +756,7 @@ function TucsonEatsTournament() {
         {/* background glow */}
         <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 20% 60%, rgba(75,134,62,.25) 0%, transparent 55%), radial-gradient(ellipse at 80% 30%, rgba(212,22,116,.1) 0%, transparent 50%)", pointerEvents: "none" }} />
 
-        <div style={{ maxWidth: "1200px", margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 380px", minHeight: "520px", position: "relative", zIndex: 1 }}>
+        <div className="te-hero-grid" style={{ maxWidth: "1200px", margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 380px", minHeight: "520px", position: "relative", zIndex: 1 }}>
 
           {/* ── LEFT: Brand + CTA ── */}
           <div style={{ padding: "52px 40px 52px 32px", display: "flex", flexDirection: "column", justifyContent: "center", borderRight: "1px solid var(--border)" }}>
@@ -838,7 +842,7 @@ function TucsonEatsTournament() {
           </div>
 
           {/* ── RIGHT: Casino Live Rankings ── */}
-          <div style={{ background: "linear-gradient(180deg, #0D1A00 0%, #0A1400 40%, #050D00 100%)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+          <div className="te-rankings-col" style={{ background: "linear-gradient(180deg, #0D1A00 0%, #0A1400 40%, #050D00 100%)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
 
             {/* felt texture overlay */}
             <div style={{ position: "absolute", inset: 0, opacity: 0.06,
