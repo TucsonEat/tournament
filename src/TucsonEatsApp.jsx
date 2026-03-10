@@ -611,11 +611,7 @@ function TucsonEatsTournament() {
   const syncStorage = async () => {
     let existing = [];
     try { const r = await storage.get(STORAGE_KEY); if (r) existing = JSON.parse(r.value); } catch {}
-    const ids = new Set(existing.map(r => r.id));
-    const missing = SEED.filter(r => !ids.has(r.id));
-    const merged = missing.length ? [...existing, ...missing] : existing;
-    if (missing.length) await storage.set(STORAGE_KEY, JSON.stringify(merged));
-    return merged;
+    return existing.length ? existing : [...SEED];
   };
 
   const loadData = useCallback(async (polling = false) => {
