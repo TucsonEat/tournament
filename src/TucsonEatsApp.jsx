@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 // ── Admin config ──────────────────────────────────────────
 const WORKER_URL   = "https://tucsoneats-email.mike-216.workers.dev/";
@@ -213,9 +213,12 @@ const GLOBAL_CSS = `
   .te-fade-up { animation: te-fadeUp .4s ease forwards; }
   .te-flash-glow { animation: te-flashGlow 1.2s ease; }
   @media(max-width: 750px) {
-    .te-hero-grid { grid-template-columns: 1fr !important; }
+    .te-hero-grid { grid-template-columns: 1fr !important; width: 100% !important; }
     .te-rankings-col { display: block !important; width: 100% !important; height: auto !important; min-height: 300px !important; max-height: 420px !important; position: static !important; border-left: none !important; border-top: 1px solid rgba(184,134,11,.3) !important; }
     .te-vote-right { display: none !important; }
+    .te-hero-stats { width: 100% !important; flex-wrap: wrap !important; }
+    .te-hero-stats > div { flex: 1 1 40% !important; min-width: 80px !important; }
+    body { overflow-x: hidden; }
   }
 `;
 
@@ -248,12 +251,61 @@ const storage = {
   },
 };
 
+// ── Storage keys ──────────────────────────────────────────
+// ⚠️  DEPLOYMENT NOTE (Cloudflare Pages + GitHub workflow)
+// ------------------------------------------------------------
+// These keys identify data stored in Cloudflare KV via the Worker.
+// If you ever need to bump a version number (e.g. v5 → v6):
+//   1. Add the OLD key string to LEGACY_STORAGE_KEYS or
+//      LEGACY_REGISTRY_KEYS below (whichever applies).
+//   2. Update the constant here to the new version.
+//   3. Push to GitHub → Cloudflare will deploy automatically.
+// On first load after deploy, findLegacyData() will detect that
+// the new key is empty, find the real data in the old key, copy
+// it forward to the new key, and continue without any data loss.
+// ------------------------------------------------------------
 const STORAGE_KEY  = "tucsoneats-votes-v5";
 const VOTED_KEY    = "tucsoneats-voted-v5";
 const REGISTRY_KEY = "tucsoneats-registry-v5";
-const NOTIFY_SETTINGS_KEY = "tucsoneats-notify-settings-v1";
-const NOTIFY_PENDING_KEY  = "tucsoneats-notify-pending-v1";
+const NOTIFY_SETTINGS_KEY  = "tucsoneats-notify-settings-v1";
+const NOTIFY_PENDING_KEY   = "tucsoneats-notify-pending-v1";
 const NOTIFY_LAST_SENT_KEY = "tucsoneats-notify-lastsent-v1";
+const BACKUP_SETTINGS_KEY  = "tucsoneats-backup-settings-v1";
+
+// ── Legacy key migration ───────────────────────────────────
+// When a new version changes the storage key, data in the old
+// key would be invisible to the app and it would fall back to
+// seed data — effectively wiping real votes/registrations.
+// These arrays list every previous key (oldest → newest).
+// On first load, if the current key is empty we walk backwards
+// through these to find existing data and promote it forward.
+const LEGACY_STORAGE_KEYS  = [
+  "tucsoneats-votes-v1",
+  "tucsoneats-votes-v2",
+  "tucsoneats-votes-v3",
+  "tucsoneats-votes-v4",
+];
+const LEGACY_REGISTRY_KEYS = [
+  "tucsoneats-registry-v1",
+  "tucsoneats-registry-v2",
+  "tucsoneats-registry-v3",
+  "tucsoneats-registry-v4",
+];
+
+// Returns the first non-empty array found in the given legacy
+// keys, searching newest-first so we get the most recent data.
+async function findLegacyData(legacyKeys) {
+  for (let i = legacyKeys.length - 1; i >= 0; i--) {
+    try {
+      const r = await storage.get(legacyKeys[i]);
+      if (r) {
+        const parsed = JSON.parse(r.value);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return null;
+}
 
 // ── Seed data ─────────────────────────────────────────────
 const SEED = [
@@ -610,8 +662,28 @@ function TucsonEatsTournament() {
 
   const syncStorage = async () => {
     let existing = [];
-    try { const r = await storage.get(STORAGE_KEY); if (r) existing = JSON.parse(r.value); } catch {}
-    return existing.length ? existing : [...SEED];
+    try {
+      const r = await storage.get(STORAGE_KEY);
+      if (r) {
+        existing = JSON.parse(r.value);
+      } else {
+        // Current key is empty — check legacy keys before using seed data.
+        // This prevents a version upgrade from wiping real restaurant/vote data.
+        const legacy = await findLegacyData(LEGACY_STORAGE_KEYS);
+        if (legacy) {
+          existing = legacy;
+          // Promote to current key so future loads are fast
+          await storage.set(STORAGE_KEY, JSON.stringify(existing));
+          console.info("[TucsonEats] Migrated restaurant data from legacy storage key.");
+        }
+      }
+    } catch {}
+    // Merge in any seed restaurants that don't already exist (by id)
+    const ids = new Set(existing.map(r => r.id));
+    const missing = SEED.filter(r => !ids.has(r.id));
+    const merged = missing.length ? [...existing, ...missing] : existing;
+    if (missing.length) await storage.set(STORAGE_KEY, JSON.stringify(merged));
+    return merged;
   };
 
   const loadData = useCallback(async (polling = false) => {
@@ -752,10 +824,10 @@ function TucsonEatsTournament() {
         {/* background glow */}
         <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 20% 60%, rgba(75,134,62,.25) 0%, transparent 55%), radial-gradient(ellipse at 80% 30%, rgba(212,22,116,.1) 0%, transparent 50%)", pointerEvents: "none" }} />
 
-        <div className="te-hero-grid" style={{ maxWidth: "1200px", margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 380px", minHeight: "520px", position: "relative", zIndex: 1 }}>
+        <div className="te-hero-grid" style={{ maxWidth: "1200px", margin: "0 auto", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 380px", minHeight: "520px", position: "relative", zIndex: 1 }}>
 
           {/* ── LEFT: Brand + CTA ── */}
-          <div style={{ padding: "52px 40px 52px 32px", display: "flex", flexDirection: "column", justifyContent: "center", borderRight: "1px solid var(--border)" }}>
+          <div style={{ padding: "clamp(24px, 4vw, 52px) clamp(20px, 4vw, 40px) clamp(24px, 4vw, 52px) clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", justifyContent: "center", borderRight: "1px solid var(--border)" }}>
             {/* Coming Soon Banner — bold designed */}
             <div style={{ marginBottom: "24px", position: "relative", display: "inline-block", width: "fit-content" }}>
               <div style={{
@@ -822,7 +894,7 @@ function TucsonEatsTournament() {
             </div>
 
             {/* Stats row */}
-            <div style={{ display: "flex", gap: "0", border: "1px solid var(--border)", borderRadius: "12px", overflow: "hidden", width: "fit-content", background: "rgba(0,0,0,.2)" }}>
+            <div className="te-hero-stats" style={{ display: "flex", gap: "0", border: "1px solid var(--border)", borderRadius: "12px", overflow: "hidden", maxWidth: "100%", background: "rgba(0,0,0,.2)" }}>
               {[
                 { num: totalVotes,         label: "Votes Cast" },
                 { num: restaurants.length, label: "Restaurants" },
@@ -1541,6 +1613,10 @@ function TucsonEatsAdmin() {
   const [custView, setCustView]     = useState("list"); // "votes" | "list"
   const [notifySettings, setNotifySettings] = useState({ enabled: false, sendTime: "08:00" });
   const [notifySettingsSaving, setNotifySettingsSaving] = useState(false);
+  const [backupSettings, setBackupSettings] = useState({ email: "", enabled: true, sendTime: "07:00" });
+  const [backupEmailInput, setBackupEmailInput] = useState(""); // isolated input state
+  const [backupSettingsSaving, setBackupSettingsSaving] = useState(false);
+  const settingsLoadedRef = useRef(false);
   const [restCols, setRestCols]     = useState({ rank: true, restaurant: true, cuisine: true, manager: true, phone: true, email: true, address: true, votes: true, share: true });
   const [selectedRestFilter, setSelectedRestFilter] = useState(null); // restaurant id to drill into
 
@@ -1558,20 +1634,42 @@ function TucsonEatsAdmin() {
   };
 
   const loadData = useCallback(async () => {
-    // Load restaurants
+    // Load restaurants — migrate from legacy keys if current key is empty
     let rests = [];
     try {
       const r = await storage.get(STORAGE_KEY);
-      if (r) rests = JSON.parse(r.value);
-      else rests = [...SEED];
+      if (r) {
+        rests = JSON.parse(r.value);
+      } else {
+        // Check legacy keys before falling back to seed data
+        const legacy = await findLegacyData(LEGACY_STORAGE_KEYS);
+        if (legacy) {
+          rests = legacy;
+          // Promote to current key
+          await storage.set(STORAGE_KEY, JSON.stringify(rests));
+          console.info("[TucsonEats Admin] Migrated restaurant data from legacy storage key.");
+        } else {
+          // Truly no data anywhere — use seed as display-only fallback (do NOT write it back)
+          rests = [...SEED];
+        }
+      }
     } catch { rests = [...SEED]; }
     setRests(rests);
 
-    // Load registry
+    // Load registry — migrate from legacy keys if current key is empty
     let reg = [];
     try {
       const r = await storage.get(REGISTRY_KEY);
-      if (r) reg = JSON.parse(r.value);
+      if (r) {
+        reg = JSON.parse(r.value);
+      } else {
+        const legacy = await findLegacyData(LEGACY_REGISTRY_KEYS);
+        if (legacy) {
+          reg = legacy;
+          await storage.set(REGISTRY_KEY, JSON.stringify(reg));
+          console.info("[TucsonEats Admin] Migrated registry data from legacy storage key.");
+        }
+      }
     } catch {}
     setRegistry(reg);
 
@@ -1582,13 +1680,27 @@ function TucsonEatsAdmin() {
       else setAdmins([DEFAULT_ADMIN]);
     } catch { setAdmins([DEFAULT_ADMIN]); }
 
-    // Load notify settings
-    let nSettings = { enabled: false, sendTime: "08:00" };
-    try {
-      const r = await storage.get(NOTIFY_SETTINGS_KEY);
-      if (r) nSettings = JSON.parse(r.value);
-    } catch {}
-    setNotifySettings(nSettings);
+    // Load notify + backup settings only on initial load, not on every poll.
+    // The 8-second polling interval would otherwise overwrite whatever the
+    // user is actively typing in the email/time inputs.
+    if (!settingsLoadedRef.current) {
+      let nSettings = { enabled: false, sendTime: "08:00" };
+      try {
+        const r = await storage.get(NOTIFY_SETTINGS_KEY);
+        if (r) nSettings = JSON.parse(r.value);
+      } catch {}
+      setNotifySettings(nSettings);
+
+      let bSettings = { email: "", enabled: true, sendTime: "07:00" };
+      try {
+        const r = await storage.get(BACKUP_SETTINGS_KEY);
+        if (r) bSettings = { ...bSettings, ...JSON.parse(r.value) };
+      } catch {}
+      setBackupSettings(bSettings);
+      setBackupEmailInput(bSettings.email || "");
+
+      settingsLoadedRef.current = true;
+    }
 
     setLoading(false);
   }, []);
@@ -1714,6 +1826,15 @@ function TucsonEatsAdmin() {
     setNotifySettings(newSettings);
     setNotifySettingsSaving(false);
     showToast("✅ Notification settings saved");
+  };
+
+  const saveBackupSettings = async (newSettings) => {
+    setBackupSettingsSaving(true);
+    await storage.set(BACKUP_SETTINGS_KEY, JSON.stringify(newSettings));
+    setBackupSettings(newSettings);
+    setBackupEmailInput(newSettings.email || "");
+    setBackupSettingsSaving(false);
+    showToast("✅ Backup settings saved");
   };
 
   const queueVoteNotification = async (restaurantId, restaurantName, voterName) => {
@@ -2654,6 +2775,107 @@ function TucsonEatsAdmin() {
                       >
                         📨 Send Digest Now
                       </button>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* ── Daily Excel Backup ── */}
+                <div className="adm-table-wrap" style={{ marginTop: "24px" }}>
+                  <div className="adm-table-header">
+                    <div>
+                      <h3>📊 Daily Excel Backup</h3>
+                      <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--text-dim)" }}>A formatted Excel file with all restaurants and voter data is emailed daily</p>
+                    </div>
+                  </div>
+                  <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+                    {/* Enable / Disable toggle */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", background: "rgba(255,255,255,.03)", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "14px" }}>Enable Daily Backup</div>
+                        <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "3px" }}>Send a .xlsx backup email every day at the scheduled time</div>
+                      </div>
+                      <button
+                        onClick={() => saveBackupSettings({ ...backupSettings, enabled: !backupSettings.enabled })}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: "8px",
+                          padding: "8px 18px", borderRadius: "20px", fontSize: "13px",
+                          fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                          border: "1.5px solid",
+                          background: backupSettings.enabled ? "rgba(75,134,62,.2)" : "rgba(255,255,255,.04)",
+                          borderColor: backupSettings.enabled ? "var(--green)" : "var(--border)",
+                          color: backupSettings.enabled ? "var(--green-l)" : "var(--text-dim)",
+                          transition: "all .2s", minWidth: "100px", justifyContent: "center",
+                        }}
+                      >
+                        {backupSettings.enabled ? "🟢 Enabled" : "⚫ Disabled"}
+                      </button>
+                    </div>
+
+                    {/* Backup email address */}
+                    <div style={{ padding: "16px 20px", background: "rgba(255,255,255,.03)", borderRadius: "10px", border: "1px solid var(--border)", opacity: backupSettings.enabled ? 1 : 0.5 }}>
+                      <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "4px" }}>Backup Recipient Email</div>
+                      <div style={{ fontSize: "12px", color: "var(--text-dim)", marginBottom: "12px" }}>The Excel backup will be sent to this address each day</div>
+                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <input
+                          type="text"
+                          className="adm-input"
+                          placeholder="e.g. mike@youremail.com"
+                          value={backupEmailInput}
+                          disabled={!backupSettings.enabled}
+                          onChange={e => setBackupEmailInput(e.target.value)}
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          className="adm-btn adm-btn-green"
+                          disabled={!backupSettings.enabled || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(backupEmailInput.trim()) || backupSettingsSaving}
+                          onClick={() => saveBackupSettings({ ...backupSettings, email: backupEmailInput })}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {backupSettingsSaving ? "Saving…" : "💾 Save"}
+                        </button>
+                      </div>
+                      {backupEmailInput && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(backupEmailInput) && (
+                        <p style={{ color: "var(--red, #fc8181)", fontSize: "11px", margin: "6px 0 0" }}>⚠️ Please enter a valid email address</p>
+                      )}
+                    </div>
+
+                    {/* Send time */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", background: "rgba(255,255,255,.03)", borderRadius: "10px", border: "1px solid var(--border)", opacity: backupSettings.enabled ? 1 : 0.5 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "14px" }}>Daily Send Time</div>
+                        <div style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "3px" }}>Backup will be emailed once per day at this time (Arizona time)</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <input
+                          type="time"
+                          value={backupSettings.sendTime}
+                          disabled={!backupSettings.enabled}
+                          onChange={e => setBackupSettings(s => ({ ...s, sendTime: e.target.value }))}
+                          className="adm-input"
+                          style={{ width: "130px", fontSize: "15px", fontWeight: 700, textAlign: "center" }}
+                        />
+                        <button
+                          className="adm-btn adm-btn-green"
+                          disabled={!backupSettings.enabled || backupSettingsSaving}
+                          onClick={() => saveBackupSettings(backupSettings)}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {backupSettingsSaving ? "Saving…" : "💾 Save"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* What's included */}
+                    <div style={{ background: "rgba(245,200,66,.05)", border: "1px solid rgba(245,200,66,.2)", borderRadius: "10px", padding: "14px 18px" }}>
+                      <div style={{ fontWeight: 700, fontSize: "12px", color: "var(--gold)", marginBottom: "8px", letterSpacing: "1px", textTransform: "uppercase" }}>What's in the Excel file</div>
+                      <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: "12px", color: "var(--text-dim)", lineHeight: 2 }}>
+                        <li><strong style={{ color: "var(--text-muted)" }}>📊 Summary</strong> — snapshot stats and top 5 leaderboard</li>
+                        <li><strong style={{ color: "var(--text-muted)" }}>🍽️ Restaurants</strong> — full list with votes, contacts, and addresses</li>
+                        <li><strong style={{ color: "var(--text-muted)" }}>👤 Voters</strong> — complete registry with vote history</li>
+                        <li><strong style={{ color: "var(--text-muted)" }}>📈 Cuisine Breakdown</strong> — votes grouped by cuisine type</li>
+                      </ul>
                     </div>
 
                   </div>
